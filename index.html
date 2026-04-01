@@ -2,161 +2,140 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <title>英语精听助手 - 自动切换模式版</title>
+    <title>英语听力精听助手</title>
     <style>
-        body { font-family: 'PingFang SC', 'Helvetica Neue', sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; background-color: #f4f4f9; color: #2d3436; }
-        .container { background: white; padding: 40px; border-radius: 28px; box-shadow: 0 15px 30px rgba(0,0,0,0.05); text-align: center; width: 85%; max-width: 420px; border: 1px solid #eee; }
-        .round-display { margin-bottom: 25px; }
-        .round-label { font-size: 12px; color: #b2bec3; font-weight: bold; letter-spacing: 2px; }
-        .round-num { font-size: 72px; color: #0984e3; font-weight: 900; line-height: 1; margin: 5px 0; }
-        .mode-tag { display: inline-block; padding: 4px 12px; border-radius: 6px; font-size: 12px; font-weight: bold; margin-top: 5px; }
-        .mode-1 { background: #dfe6e9; color: #636e72; } /* 模考模式 */
-        .mode-plus { background: #fab1a0; color: #d63031; } /* 精听模式 */
-        
-        audio { width: 100%; margin: 30px 0; }
-        .mark-btn { background: #2d3436; color: white; border: none; padding: 20px; font-size: 18px; border-radius: 18px; cursor: pointer; transition: all 0.2s; width: 100%; font-weight: bold; box-shadow: 0 8px 15px rgba(0,0,0,0.1); }
-        .mark-btn:active { transform: scale(0.96); background: #000; }
-        
-        .status-msg { height: 24px; font-size: 14px; color: #636e72; margin-top: 20px; }
-        .file-box { margin-bottom: 20px; }
-        .reset-link { margin-top: 35px; color: #b2bec3; font-size: 12px; cursor: pointer; display: block; text-decoration: none; }
-        .reset-link:hover { color: #d63031; }
-        
-        /* 慢速播放时的动画 */
-        .slowing { color: #d63031 !important; font-weight: bold; animation: pulse 1s infinite; }
-        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.6; } 100% { opacity: 1; } }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; background-color: #f4f7f6; }
+        .container { background: white; padding: 30px; border-radius: 15px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); text-align: center; width: 80%; max-width: 500px; }
+        .round-info { font-size: 24px; color: #2c3e50; margin-bottom: 10px; font-weight: bold; }
+        .status-msg { color: #7f8c8d; margin-bottom: 20px; font-size: 14px; }
+        audio { width: 100%; margin-bottom: 20px; }
+        .mark-btn { background-color: #e74c3c; color: white; border: none; padding: 15px 30px; font-size: 18px; border-radius: 50px; cursor: pointer; transition: transform 0.1s; width: 100%; }
+        .mark-btn:active { transform: scale(0.95); }
+        .controls { margin-top: 20px; border-top: 1px solid #eee; padding-top: 20px; }
+        input[type="file"] { margin-bottom: 20px; }
+        .mark-list { margin-top: 15px; font-size: 12px; color: #95a5a6; max-height: 100px; overflow-y: auto; }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <div class="round-display">
-        <div class="round-label">HEARING ROUND</div>
-        <div id="roundIndicator" class="round-num">1</div>
-        <div id="modeTag" class="mode-tag mode-1">模考模式：正常语速</div>
-    </div>
-    
-    <div class="file-box">
-        <input type="file" id="audioUpload" accept="audio/*">
-    </div>
+    <div id="roundIndicator" class="round-info">第 1 遍</div>
+    <div id="status" class="status-msg">上传音频后开始听力...</div>
 
+    <input type="file" id="audioUpload" accept="audio/*">
+    
     <audio id="audioPlayer" controls></audio>
 
-    <button class="mark-btn" onclick="addMark()">MARK (标记难点)</button>
-    
-    <div id="status" class="status-msg">等待上传音频...</div>
+    <button class="mark-btn" onclick="addMark()">没听清？点击标记 (Mark)</button>
 
-    <a class="reset-link" onclick="resetAll()">清空标记并重置为第 1 遍</a>
+    <div class="controls">
+        <button onclick="resetRounds()">重置遍数</button>
+        <div class="mark-list" id="markList">标记点：无</div>
+    </div>
 </div>
 
 <script>
     const audio = document.getElementById('audioPlayer');
-    const roundUI = document.getElementById('roundIndicator');
-    const modeTag = document.getElementById('modeTag');
+    const roundIndicator = document.getElementById('roundIndicator');
     const statusMsg = document.getElementById('status');
+    const markListDiv = document.getElementById('markList');
 
-    let marks = [];
-    let currentRound = 1;
-    let timeBeforeSeek = 0;
-    const SLOW_RANGE = 2.0; // 标记点前后2秒自动减速
+    let marks = [];          // 存储标记的时间点（秒）
+    let currentRound = 1;    // 当前遍数
+    let lastTime = 0;        // 记录上一次的时间，用于检测是否往回拉了
+    const SLOW_RANGE = 2;    // 标记点前后自动减速的范围（秒）
 
-    // 1. 上传音频
+    // 1. 处理音频上传
     document.getElementById('audioUpload').onchange = function(e) {
         const file = e.target.files[0];
         if (file) {
             audio.src = URL.createObjectURL(file);
-            resetAll();
-            statusMsg.innerText = "已加载。第一遍请尝试完整听完。";
+            resetRounds();
+            statusMsg.innerText = "音频已加载。第1遍请正常收听，标记模糊处。";
         }
     };
 
     // 2. 标记功能
     function addMark() {
-        if (!audio.src) return;
-        const now = audio.currentTime;
-        marks.push(now);
-        statusMsg.innerText = `已标记 ${Math.round(now)}s`;
-        if (currentRound === 1) {
-            statusMsg.innerText += " (当前为第一遍，不减速)";
+        const currentTime = audio.currentTime;
+        if (currentTime > 0) {
+            marks.push(currentTime);
+            updateMarkList();
+            statusMsg.innerText = `已标记在 ${Math.round(currentTime)}秒 附近`;
         }
     }
 
-    // 3. 核心：识别遍数切换
+    // 3. 遍数自动识别逻辑 (核心)
     audio.onseeking = function() {
-        if (!audio.dataset.isSeeking) {
-            timeBeforeSeek = audio.currentTime;
-            audio.dataset.isSeeking = "true";
-        }
-    };
-
-    audio.onseeked = function() {
-        const timeAfterSeek = audio.currentTime;
-        // 如果往回拖动超过 1.5 秒，或者直接点重播跳回开头
-        if (timeAfterSeek < timeBeforeSeek - 1.5) {
-            enterNextRound();
-        }
-        audio.dataset.isSeeking = "";
-    };
-
-    // 监听播放结束，如果再次播放也算下一遍
-    audio.onplay = function() {
-        if (audio.currentTime < 1 && currentRound === 1 && marks.length > 0) {
-            // 如果是在已经有标记的情况下从头播放，且当前是第一遍，则跳入第二遍
-            // 这解决了“听完后点重播”的情况
-        }
-    };
-
-    function enterNextRound() {
-        if (currentRound === 1) {
-            currentRound = 2;
-            modeTag.innerText = "精听模式：标记处自动慢速";
-            modeTag.className = "mode-tag mode-plus";
-        } else {
+        // 如果用户把进度条往回拉超过3秒，判定为进入下一遍
+        if (audio.currentTime < lastTime - 1) {
             currentRound++;
+            updateRoundUI();
         }
-        roundUI.innerText = currentRound;
-        statusMsg.innerText = `进入第 ${currentRound} 遍，准备攻克难点`;
-    }
+        lastTime = audio.currentTime;
+    };
 
-    // 4. 变速逻辑控制
+    // 4. 实时播放控制逻辑
     audio.ontimeupdate = function() {
         const now = audio.currentTime;
 
-        // 仅在第二遍及以后才触发减速
-        if (currentRound > 1 && marks.length > 0) {
-            let shouldSlow = false;
-            for (let m of marks) {
-                if (now >= (m - SLOW_RANGE) && now <= (m + SLOW_RANGE)) {
-                    shouldSlow = true;
+        // 仅在第2遍及以后才开启自动减速
+        if (currentRound > 1) {
+            let shouldSlowDown = false;
+            
+            // 检查当前时间是否在任何一个标记点的范围内
+            for (let mark of marks) {
+                if (now >= (mark - SLOW_RANGE) && now <= (mark + SLOW_RANGE)) {
+                    shouldSlowDown = true;
                     break;
                 }
             }
 
-            if (shouldSlow) {
+            if (shouldSlowDown) {
                 if (audio.playbackRate !== 0.5) {
                     audio.playbackRate = 0.5;
-                    statusMsg.innerText = "--- 慢速解析中 ---";
-                    statusMsg.classList.add("slowing");
+                    statusMsg.innerText = "进入标记区域：慢速播放中...";
+                    statusMsg.style.color = "#e67e22";
                 }
             } else {
                 if (audio.playbackRate !== 1.0) {
                     audio.playbackRate = 1.0;
-                    statusMsg.innerText = "正常语速";
-                    statusMsg.classList.remove("slowing");
+                    statusMsg.innerText = "常速播放中";
+                    statusMsg.style.color = "#7f8c8d";
                 }
             }
         }
+        
+        // 更新 lastTime，但避开正在seeking的情况
+        if (!audio.seeking) {
+            lastTime = now;
+        }
     };
 
-    function resetAll() {
+    // UI 更新函数
+    function updateRoundUI() {
+        roundIndicator.innerText = `第 ${currentRound} 遍`;
+        if (currentRound > 1) {
+            statusMsg.innerText = "复习模式：标记点前后将自动减速";
+        }
+    }
+
+    function resetRounds() {
         currentRound = 1;
         marks = [];
+        updateRoundUI();
+        updateMarkList();
+        statusMsg.innerText = "已重置。开始第1遍记录。";
         audio.playbackRate = 1.0;
-        roundUI.innerText = "1";
-        modeTag.innerText = "模考模式：正常语速";
-        modeTag.className = "mode-tag mode-1";
-        statusMsg.innerText = "已重置。开始第一遍记录。";
-        statusMsg.classList.remove("slowing");
+    }
+
+    function updateMarkList() {
+        if (marks.length === 0) {
+            markListDiv.innerText = "标记点：无";
+        } else {
+            const list = marks.map(m => Math.round(m) + "s").join(", ");
+            markListDiv.innerText = "标记点：" + list;
+        }
     }
 </script>
 
