@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>英语精听助手 - 自动切换模式版</title>
+    <style>
+        body { font-family: 'PingFang SC', 'Helvetica Neue', sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; background-color: #f4f4f9; color: #2d3436; }
+        .container { background: white; padding: 40px; border-radius: 28px; box-shadow: 0 15px 30px rgba(0,0,0,0.05); text-align: center; width: 85%; max-width: 420px; border: 1px solid #eee; }
+        .round-display { margin-bottom: 25px; }
+        .round-label { font-size: 12px; color: #b2bec3; font-weight: bold; letter-spacing: 2px; }
+        .round-num { font-size: 72px; color: #0984e3; font-weight: 900; line-height: 1; margin: 5px 0; }
+        .mode-tag { display: inline-block; padding: 4px 12px; border-radius: 6px; font-size: 12px; font-weight: bold; margin-top: 5px; }
+        .mode-1 { background: #dfe6e9; color: #636e72; } /* 模考模式 */
+        .mode-plus { background: #fab1a0; color: #d63031; } /* 精听模式 */
+        
+        audio { width: 100%; margin: 30px 0; }
+        .mark-btn { background: #2d3436; color: white; border: none; padding: 20px; font-size: 18px; border-radius: 18px; cursor: pointer; transition: all 0.2s; width: 100%; font-weight: bold; box-shadow: 0 8px 15px rgba(0,0,0,0.1); }
+        .mark-btn:active { transform: scale(0.96); background: #000; }
+        
+        .status-msg { height: 24px; font-size: 14px; color: #636e72; margin-top: 20px; }
+        .file-box { margin-bottom: 20px; }
+        .reset-link { margin-top: 35px; color: #b2bec3; font-size: 12px; cursor: pointer; display: block; text-decoration: none; }
+        .reset-link:hover { color: #d63031; }
+        
+        /* 慢速播放时的动画 */
+        .slowing { color: #d63031 !important; font-weight: bold; animation: pulse 1s infinite; }
+        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.6; } 100% { opacity: 1; } }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="round-display">
+        <div class="round-label">HEARING ROUND</div>
+        <div id="roundIndicator" class="round-num">1</div>
+        <div id="modeTag" class="mode-tag mode-1">模考模式：正常语速</div>
+    </div>
+    
+    <div class="file-box">
+        <input type="file" id="audioUpload" accept="audio/*">
+    </div>
+
+    <audio id="audioPlayer" controls></audio>
+
+    <button class="mark-btn" onclick="addMark()">MARK (标记难点)</button>
+    
+    <div id="status" class="status-msg">等待上传音频...</div>
+
+    <a class="reset-link" onclick="resetAll()">清空标记并重置为第 1 遍</a>
+</div>
+
+<script>
+    const audio = document.getElementById('audioPlayer');
+    const roundUI = document.getElementById('roundIndicator');
+    const modeTag = document.getElementById('modeTag');
+    const statusMsg = document.getElementById('status');
+
+    let marks = [];
+    let currentRound = 1;
+    let timeBeforeSeek = 0;
+    const SLOW_RANGE = 2.0; // 标记点前后2秒自动减速
+
+    // 1. 上传音频
+    document.getElementById('audioUpload').onchange = function(e) {
+        const file = e.target.files[0];
+        if (file) {
+            audio.src = URL.createObjectURL(file);
+            resetAll();
+            statusMsg.innerText = "已加载。第一遍请尝试完整听完。";
+        }
+    };
+
+    // 2. 标记功能
+    function addMark() {
+        if (!audio.src) return;
+        const now = audio.currentTime;
+        marks.push(now);
+        statusMsg.innerText = `已标记 ${Math.round(now)}s`;
+        if (currentRound === 1) {
+            statusMsg.innerText += " (当前为第一遍，不减速)";
+        }
+    }
+
+    // 3. 核心：识别遍数切换
+    audio.onseeking = function() {
+        if (!audio.dataset.isSeeking) {
+            timeBeforeSeek = audio.currentTime;
+            audio.dataset.isSeeking = "true";
+        }
+    };
+
+    audio.onseeked = function() {
+        const timeAfterSeek = audio.currentTime;
+        // 如果往回拖动超过 1.5 秒，或者直接点重播跳回开头
+        if (timeAfterSeek < timeBeforeSeek - 1.5) {
+            enterNextRound();
+        }
+        audio.dataset.isSeeking = "";
+    };
+
+    // 监听播放结束，如果再次播放也算下一遍
+    audio.onplay = function() {
+        if (audio.currentTime < 1 && currentRound === 1 && marks.length > 0) {
+            // 如果是在已经有标记的情况下从头播放，且当前是第一遍，则跳入第二遍
+            // 这解决了“听完后点重播”的情况
+        }
+    };
+
+    function enterNextRound() {
+        if (currentRound === 1) {
+            currentRound = 2;
+            modeTag.innerText = "精听模式：标记处自动慢速";
+            modeTag.className = "mode-tag mode-plus";
+        } else {
+            currentRound++;
+        }
+        roundUI.innerText = currentRound;
+        statusMsg.innerText = `进入第 ${currentRound} 遍，准备攻克难点`;
+    }
+
+    // 4. 变速逻辑控制
+    audio.ontimeupdate = function() {
+        const now = audio.currentTime;
+
+        // 仅在第二遍及以后才触发减速
+        if (currentRound > 1 && marks.length > 0) {
+            let shouldSlow = false;
+            for (let m of marks) {
+                if (now >= (m - SLOW_RANGE) && now <= (m + SLOW_RANGE)) {
+                    shouldSlow = true;
+                    break;
+                }
+            }
+
+            if (shouldSlow) {
+                if (audio.playbackRate !== 0.5) {
+                    audio.playbackRate = 0.5;
+                    statusMsg.innerText = "--- 慢速解析中 ---";
+                    statusMsg.classList.add("slowing");
+                }
+            } else {
+                if (audio.playbackRate !== 1.0) {
+                    audio.playbackRate = 1.0;
+                    statusMsg.innerText = "正常语速";
+                    statusMsg.classList.remove("slowing");
+                }
+            }
+        }
+    };
+
+    function resetAll() {
+        currentRound = 1;
+        marks = [];
+        audio.playbackRate = 1.0;
+        roundUI.innerText = "1";
+        modeTag.innerText = "模考模式：正常语速";
+        modeTag.className = "mode-tag mode-1";
+        statusMsg.innerText = "已重置。开始第一遍记录。";
+        statusMsg.classList.remove("slowing");
+    }
+</script>
+
+</body>
+</html>
